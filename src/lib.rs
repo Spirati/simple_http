@@ -8,7 +8,7 @@ use std::net::{TcpListener, TcpStream};
 use std::collections::HashMap;
 
 /// Function signature for handler functions 
-pub type RequestHandler = fn(req: Request<&str>) -> Response<&str>;
+pub type RequestHandler = fn(req: Request<&str>) -> Response<String>;
 
 /// A HashMap that associates paths with [`RequestHandler`] functions
 pub type HandlerMap = HashMap<String, RequestHandler>;
@@ -33,6 +33,25 @@ impl App {
         }
     }
     /// Add a [`RequestHandler`] that handles requests to a path matching `path`
+    /// 
+    /// # Example
+    /// 
+    /// ```rust
+    /// fn main() {
+    ///     let app = App::new("127.0.0.1:8000");
+    /// 
+    ///     app.add_handler("/echo", echo_handler);
+    /// }
+    /// 
+    /// // Responds to request with host uri
+    /// fn echo_handler(req: http::Request<&str>) -> http::Response<String> {
+    ///     let host = format!("{:?}", req.headers().get("Host").unwrap());
+    ///     http::Response::builder()
+    ///         .status(200)
+    ///         .body(host)
+    ///         .unwrap()
+    /// }
+    /// ```
     pub fn add_handler(&mut self, path: String, handler: RequestHandler) {
         self.handlers.insert(path, handler);
     }
@@ -89,10 +108,7 @@ impl App {
     
         res.headers().iter().for_each(
             |(k, v)| {
-                let cropped = String::from(format!("{:?}", v));
-                let cropped: std::borrow::Cow<'_, str> = Regex::new("(^\")|(\"$)")
-                    .unwrap()
-                    .replace_all(cropped.as_str(), "");
+                let cropped = http_util::parse_header(v);
                 header_string = format!(
                     "{}{}\r\n", 
                     header_string, format!("{}: {}", k, cropped.deref())
@@ -116,12 +132,62 @@ impl App {
     }
 }
 
+
 mod default_handlers {
+    //! A collection of [`RequestHandler`]s useful for common, simple behaviors like 40x status codes
+
     /// Simple catch-all function for returning a 404 when no paths match
-    pub fn not_found(_req: http::Request<&str>) -> http::Response<&str> {
+    pub fn not_found(_req: http::Request<&str>) -> http::Response<String> {
         http::Response::builder()
             .status(404)
-            .body("")
+            .body(String::new())
             .unwrap()
+    }
+}
+
+pub mod http_util {
+    use std::ops::Deref;
+
+    /// Extract the value from a given header in a request
+    /// 
+    /// # Example
+    /// 
+    /// Given an HTTP request like
+    /// ```
+    /// GET /foo HTTP/1.1
+    /// Host: bar.com 
+    /// ```
+    /// encoded in a [`http::Request`] `req`, we can extract `bar.com` from the `Host` header like so:
+    /// ```rust
+    /// let host: String = extract_header(req, "Host");
+    /// ```
+    pub fn extract_header<T>(src: http::Request<T>, header: &str) -> String {
+        let hv = src.headers().get(header).unwrap();
+        let cropped = String::from(format!("{:?}", hv));
+        let cropped: std::borrow::Cow<'_, str> = regex::Regex::new("(^\")|(\"$)")
+            .unwrap()
+            .replace_all(cropped.as_str(), "");
+        
+        String::from(cropped.deref())
+    }
+    /// Extract the value from a given header from a [`http::HeaderValue`]
+    /// 
+    /// Example
+    /// Given an HTTP request like
+    /// ```
+    /// GET /foo HTTP/1.1
+    /// Host: bar.com 
+    /// ```
+    /// with the Host header encoded in a [`http::HeaderValue`] `hv` (e.g. from a [`http::Request`]'s `.headers().iter()`), we can extract `bar.com` like so:
+    /// ```rust
+    /// let host: String = parse_header(hv);
+    /// ```
+    pub fn parse_header(header: &http::HeaderValue) -> String {
+        let cropped = String::from(format!("{:?}", header));
+        let cropped: std::borrow::Cow<'_, str> = regex::Regex::new("(^\")|(\"$)")
+            .unwrap()
+            .replace_all(cropped.as_str(), "");
+        
+        String::from(cropped.deref())
     }
 }
