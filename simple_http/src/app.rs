@@ -103,7 +103,6 @@ impl App {
         Some(build.body(body).unwrap())
     }
 
-    #[allow(clippy::unused_io_amount)]
     fn handle_connection(&self, mut stream: TcpStream) -> Option<usize> {
         let mut buffer = [0; 1024];
         stream.read(&mut buffer).unwrap();
