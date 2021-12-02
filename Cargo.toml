@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 http = "0.2.5"
 regex = "1.5.4"
+percent-encoding = "2.1.0"
