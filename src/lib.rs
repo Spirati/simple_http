@@ -1,32 +1,39 @@
 //! Quick and dirty HTTP library for handling simple web requests
 
 use http::{Request, Response};
-use std::collections::HashMap;
+use regex::Regex;
 
 /// Function signature for handler functions 
 pub type RequestHandler = fn(req: Request<&str>) -> Response<String>;
 
-/// A HashMap that associates paths with [`RequestHandler`] functions
-pub type HandlerMap = HashMap<String, RequestHandler>;
+/// A struct containing a pattern for URI paths to match; TBA is a means of extracting parameters (e.g. `/users/{id}`)
+pub struct PathMatcher {
+    pub regex: Regex
+}
+
+/// A `Vec` that associates [`PathMatcher`] expressions with [`RequestHandler`] functions
+pub type HandlerList = Vec<(PathMatcher, RequestHandler)>;
 
 pub mod app {
+    //! A module to encapsulate the functionality of the [`App`] struct
+
     use std::io::prelude::*;
     use regex::Regex;
     use std::ops::Deref;
     use std::net::{TcpListener, TcpStream};
     use http::Request;
-    use super::{RequestHandler, HandlerMap};
+    use super::{RequestHandler, HandlerList};
 
     /// Manages [`RequestHandler`] functions and the state of your web service
     pub struct App {
         listener: TcpListener,
-        handlers: HandlerMap
+        handlers: HandlerList
     }
 
     impl App {
         /// Creates a new [`App`] bound to `ip`
         pub fn new(ip: &str) -> App {
-            App{listener: TcpListener::bind(ip).unwrap(), handlers: HandlerMap::new()}
+            App{listener: TcpListener::bind(ip).unwrap(), handlers: HandlerList::new()}
         }
         /// Start the [`App`] instance and start listening for incoming connections
         pub fn run(&self) {
@@ -37,6 +44,10 @@ pub mod app {
             }
         }
         /// Add a [`RequestHandler`] that handles requests to a path matching `path`
+        /// 
+        /// Path matching is done via regular expressions: a `path` of `"/(foo|bar)"` would match both `/foo` and `/bar`.
+        /// Take note that matching is done lazily in order of creation: less specific patterns should be added after 
+        /// more specific ones in order to avoid short-circuiting behavior. 
         /// 
         /// # Example
         /// 
@@ -56,8 +67,8 @@ pub mod app {
         ///         .unwrap()
         /// }
         /// ```
-        pub fn add_handler(&mut self, path: String, handler: RequestHandler) {
-            self.handlers.insert(path, handler);
+        pub fn add_handler(&mut self, path: &str, handler: RequestHandler) {
+            self.handlers.push((super::PathMatcher{regex: Regex::new(path).unwrap()}, handler));
         }
         fn parse_request(req_str: &str) -> Option<Request<&str>> {
 
@@ -101,13 +112,19 @@ pub mod app {
         }
         fn handle_connection(&self, mut stream: TcpStream) -> Option<usize> {
             let mut buffer = [0; 1024];
-            stream.read_exact(&mut buffer).unwrap();
+            stream.read(&mut buffer).unwrap();
         
             let request_string = String::from_utf8_lossy(&buffer[..]);
         
             let req = App::parse_request(request_string.deref()).unwrap();
-            let res = match self.handlers.get(req.uri().path()) {
-                Some(t) => t(req),
+            let matching_path = self.handlers.iter().find(
+                |r| r.0.regex.is_match(req.uri().path())
+            );
+
+            let res = match matching_path {
+                Some((_, h)) => {
+                    h(req)
+                }
                 None => super::default_handlers::not_found(req)
             };
 
@@ -144,7 +161,7 @@ pub mod app {
 pub mod default_handlers {
     //! A collection of [`RequestHandler`](super::RequestHandler)s useful for common, simple behaviors like 40x status codes
 
-    /// Simple catch-all function for returning a 404 when no paths match
+    /// Simple catch-all function for returning a `404 Not Found` when no paths match
     pub fn not_found(_req: http::Request<&str>) -> http::Response<String> {
         http::Response::builder()
             .status(404)
@@ -154,6 +171,8 @@ pub mod default_handlers {
 }
 
 pub mod http_util {
+    //! A collection of useful operations on `[http]` structs
+
     use std::ops::Deref;
 
     /// Extract the value from a given header in a request
