@@ -1,12 +1,10 @@
 //! A module to encapsulate the functionality of the [`App`] struct
 
 use super::{HandlerList, RequestHandler};
-use http::Request;
 use regex::Regex;
 use std::io::prelude::*;
 use std::net::{TcpListener, TcpStream};
 use std::ops::Deref;
-
 /// Manages [`RequestHandler`] functions and the state of your web service
 pub struct App {
     listener: TcpListener,
@@ -61,47 +59,6 @@ impl App {
             handler,
         ));
     }
-    fn parse_request(req_str: &str) -> Option<Request<&str>> {
-        let re = Regex::new(concat!(
-            r"(?m)(?P<method>[A-Z]+) ",
-            r"(?P<path>[^ ]+) ",
-            r"HTTP/1\.\d\r\n",
-            r"(?P<headers>(?:[A-Za-z-]+: [^\r\n]+\r\n)+)?",
-            r"(?:\r\n(?P<body>.+))?"
-        ))
-        .unwrap();
-        let caps = match re.captures(req_str) {
-            Some(t) => t,
-            None => {
-                println!("{}", req_str);
-                return Option::None;
-            }
-        };
-
-        let method = caps.name("method").unwrap().as_str();
-        let path = caps.name("path").unwrap().as_str();
-        let headers = match caps.name("headers") {
-            Option::Some(t) => t.as_str(),
-            Option::None => "",
-        };
-
-        let headers: Vec<(&str, &str)> = headers
-            .split("\r\n")
-            .filter(|x| x != &"")
-            .map(|x| x.split_once(": ").unwrap())
-            .collect();
-
-        let body = match caps.name("body") {
-            Option::Some(t) => t.as_str(),
-            Option::None => "",
-        };
-
-        let mut build = Request::builder().method(method).uri(path);
-        for (key, value) in headers {
-            build = build.header(key, value);
-        }
-        Some(build.body(body).unwrap())
-    }
 
     fn handle_connection(&self, mut stream: TcpStream) -> Option<usize> {
         let mut buffer = [0; 1024];
@@ -109,7 +66,7 @@ impl App {
 
         let request_string = String::from_utf8_lossy(&buffer[..]);
 
-        let req = App::parse_request(request_string.deref()).unwrap();
+        let req = super::http_util::parse_request(request_string.deref()).unwrap();
         let matching_path = self
             .handlers
             .iter()
